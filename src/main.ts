@@ -1,261 +1,641 @@
-import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+// Import the Three.js core library and the OrbitControls helper
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-// ---------- Renderer / Scene / Camera ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x0b0f14, 1);
-document.body.appendChild(renderer.domElement);
+/* ============================================================================
+   SECTION: TINY ON-SCREEN DEBUG LOG (hidden by default; toggle to show)
+============================================================================ */
+const debugLogEl = document.getElementById('debuglog') as HTMLPreElement;
+const toggleLogBtn = document.getElementById('toggle-log') as HTMLButtonElement;
+// Append a timestamped line to the log (but do not force it visible)
+function dbg(message: string) {
+  try {
+    if (!debugLogEl) return;
+    const ts = new Date().toISOString().slice(11, 19);
+    debugLogEl.textContent =
+      `[${ts}] ${message}\n` + (debugLogEl.textContent || '');
+  } catch {}
+}
+// Toggle visibility (no need to persist)
+function setLogVisible(visible: boolean) {
+  if (!debugLogEl || !toggleLogBtn) return;
+  debugLogEl.style.display = visible ? 'block' : 'none';
+  toggleLogBtn.textContent = visible ? 'Hide Log' : 'Show Log';
+}
+// Default: hidden
+setLogVisible(false);
+toggleLogBtn?.addEventListener('click', () => {
+  const isVisible = debugLogEl.style.display !== 'none';
+  setLogVisible(!isVisible);
+});
+
+/* ============================================================================
+   SECTION: RENDERER, SCENE, CAMERA, AND CONTROLS
+============================================================================ */
+
+const webglRenderer = new THREE.WebGLRenderer({ antialias: true });
+webglRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+webglRenderer.setSize(window.innerWidth, window.innerHeight);
+webglRenderer.setClearColor(0x0b0f14, 1);
+document.body.appendChild(webglRenderer.domElement);
 
 const scene = new THREE.Scene();
 
-// This camera will ride the path
-const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.01, 1000);
-scene.add(camera);
+const rideCamera = new THREE.PerspectiveCamera(
+  65,
+  window.innerWidth / window.innerHeight,
+  0.01,
+  1000
+);
+scene.add(rideCamera);
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
+const orbitControls = new OrbitControls(rideCamera, webglRenderer.domElement);
+orbitControls.enableDamping = true;
 
-// ---------- Lights ----------
+/* ============================================================================
+   SECTION: LIGHTING AND REFERENCE GRID
+============================================================================ */
+
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.6));
-const dir = new THREE.DirectionalLight(0xffffff, 0.7);
-dir.position.set(10, 15, 5);
-scene.add(dir);
 
-// ---------- Reference ground ----------
-const grid = new THREE.GridHelper(100, 100, 0x335a7a, 0x1f3447);
-(grid.material as THREE.Material).transparent = true;
-(grid.material as THREE.Material & { opacity: number }).opacity = 0.25;
-scene.add(grid);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+directionalLight.position.set(10, 15, 5);
+scene.add(directionalLight);
 
-// ---------- Build S-shaped path toward +Z from world origin ----------
-const sCurvePoints: THREE.Vector3[] = [
-  new THREE.Vector3(  0, 0,   0), // start at origin
-  new THREE.Vector3( 12, 0,  12),
-  new THREE.Vector3(-12, 0,  24),
-  new THREE.Vector3( 12, 0,  36),
-  new THREE.Vector3(-12, 0,  48),
-  new THREE.Vector3(  0, 0,  60)  // ends further along +Z
+const gridHelper = new THREE.GridHelper(100, 100, 0x335a7a, 0x1f3447);
+(gridHelper.material as THREE.Material).transparent = true;
+(gridHelper.material as THREE.Material & { opacity: number }).opacity = 0.25;
+scene.add(gridHelper);
+
+/* ============================================================================
+   SECTION: CURVE TRACK, TUBE MESH, AND AHEAD MARKER
+============================================================================ */
+
+const sCurveControlPoints: THREE.Vector3[] = [
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(12, 0, 12),
+  new THREE.Vector3(-12, 0, 24),
+  new THREE.Vector3(12, 0, 36),
+  new THREE.Vector3(-12, 0, 48),
+  new THREE.Vector3(0, 0, 60),
 ];
 
-// Catmull-Rom curve (not closed)
-const curve = new THREE.CatmullRomCurve3(sCurvePoints, false, "catmullrom", 0.5);
+const rideCurve = new THREE.CatmullRomCurve3(
+  sCurveControlPoints,
+  false,
+  'catmullrom',
+  0.5
+);
 
-// ---------- Visualize the curve with a light-blue tube ----------
 const tubeRadius = 0.25;
-const tube = new THREE.Mesh(
-  new THREE.TubeGeometry(curve, 400, tubeRadius, 16, false),
+const trackTubeMesh = new THREE.Mesh(
+  new THREE.TubeGeometry(rideCurve, 400, tubeRadius, 16, false),
   new THREE.MeshPhongMaterial({
-    color: 0x8fd3ff,      // light blue
+    color: 0x8fd3ff,
     emissive: 0x001521,
     shininess: 60,
-    specular: 0x99d6ff
+    specular: 0x99d6ff,
   })
 );
-scene.add(tube);
+scene.add(trackTubeMesh);
 
-// Optional: markers for raw control points
-const cpMat = new THREE.MeshBasicMaterial({ color: 0x9ad7ff });
-const cpGeo = new THREE.SphereGeometry(0.15, 16, 16);
-for (const p of sCurvePoints) {
-  const m = new THREE.Mesh(cpGeo, cpMat);
-  m.position.copy(p);
-  scene.add(m);
+const leadMarkerMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(0.2, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0x2ecc71 })
+);
+leadMarkerMesh.scale.set(0.2, 0.2, 0.2);
+scene.add(leadMarkerMesh);
+
+/* ============================================================================
+   SECTION: RIDE STATE
+============================================================================ */
+
+const cameraHeightOffset = 0.4;
+let rideProgressT = 0;
+let isRideActive = false;
+let isRideLooping = true;
+let rideDurationSeconds = 30;
+const frameClock = new THREE.Clock();
+
+/* ============================================================================
+   SECTION: GYROSCOPE STATE (YAW CONTROL)
+============================================================================ */
+
+let isGyroEnabled = false;
+let yawBaselineDegrees = 0;
+let yawAbsoluteDegreesSmoothed = 0;
+let yawRelativeDegreesSmoothed = 0;
+let yawLowPassAlpha = 0.15;
+let yawSensitivity = 1.0; // default requested
+const maxYawDegrees = 60;
+const yawQuaternionTemp = new THREE.Quaternion();
+const worldYAxis = new THREE.Vector3(0, 1, 0);
+
+/* ============================================================================
+   SECTION: GENERIC HELPERS
+============================================================================ */
+
+function clampNumber(value: number, lo: number, hi: number) {
+  return Math.min(Math.max(value, lo), hi);
+}
+function shortestAngleDifferenceDegrees(a: number, b: number) {
+  return ((a - b + 540) % 360) - 180;
+}
+function isIOS(): boolean {
+  return (
+    [
+      'iPad Simulator',
+      'iPhone Simulator',
+      'iPod Simulator',
+      'iPad',
+      'iPhone',
+      'iPod',
+    ].includes(navigator.platform) ||
+    (navigator.userAgent.includes('Mac') && 'ontouchend' in document)
+  );
 }
 
-// ---------- Ride parameters & helpers ----------
-const cameraYOffset = 0.8; // slightly above the path
-let rideT = 0;             // normalized [0..1]
-let rideActive = false;
-let rideLoop = true;
-let rideDuration = 8;      // seconds start -> end
+/* ============================================================================
+   SECTION: ORIENTATION-AWARE HEADING → SCREEN-ALIGNED YAW
+============================================================================ */
 
-const clock = new THREE.Clock();
-
-// === GYRO STATE ===============================================================
-let gyroEnabled = false;
-let yawZeroDeg = 0;          // baseline heading when you press "Center"
-let yawCurrentDeg = 0;       // smoothed absolute heading
-let yawDisplayDeg = 0;       // smoothed relative (heading - yawZero)
-let yawLP = 0.15;            // low-pass smoothing factor (0..1), higher = snappier
-let yawGain = 1.0;           // multiplier set by the UI
-const maxYawDeg = 60;        // clamp to avoid extreme spins
-const _yawQuat = new THREE.Quaternion();
-const _YAXIS = new THREE.Vector3(0, 1, 0);
-
-function clamp(v: number, lo: number, hi: number) { return Math.min(Math.max(v, lo), hi); }
-function angDiffDeg(a: number, b: number) {
-  // smallest signed difference a-b in [-180,180]
-  let d = (a - b + 540) % 360 - 180;
-  return d;
+function getScreenOrientationType():
+  | 'portrait'
+  | 'landscape-primary'
+  | 'landscape-secondary' {
+  const type = (screen.orientation && screen.orientation.type) || '';
+  if (type.includes('landscape-primary')) return 'landscape-primary';
+  if (type.includes('landscape-secondary')) return 'landscape-secondary';
+  if (type.includes('portrait')) return 'portrait';
+  const legacy = (window as any).orientation;
+  if (legacy === 90) return 'landscape-primary';
+  if (legacy === -90) return 'landscape-secondary';
+  return 'portrait';
+}
+function getLandscapeHeadingOffsetDegrees(): number {
+  const type = getScreenOrientationType();
+  if (type === 'landscape-primary') return -90;
+  if (type === 'landscape-secondary') return 90;
+  return 0;
+}
+function mapHeadingToScreenYawDegrees(absoluteHeadingDeg: number): number {
+  const offset = getLandscapeHeadingOffsetDegrees();
+  return (absoluteHeadingDeg + offset + 360) % 360;
 }
 
-// Cross-platform heading from DeviceOrientation
-function computeHeadingDeg(e: DeviceOrientationEvent & Partial<{webkitCompassHeading: number}>): number | null {
-  // iOS Safari exposes e.webkitCompassHeading (0..360, 0=north, clockwise)
-  const wch = (e as any).webkitCompassHeading;
-  if (typeof wch === "number" && !Number.isNaN(wch)) return wch;
+/* ============================================================================
+   SECTION: DEVICE ORIENTATION → RELATIVE YAW (SMOOTHED)
+============================================================================ */
 
-  // Otherwise use alpha; when absolute, alpha=0 = device facing north (implementation-dependent)
-  if (e.absolute && typeof e.alpha === "number") {
-    // Most browsers: heading ≈ 360 - alpha
+function computeAbsoluteHeadingDegrees(
+  e: DeviceOrientationEvent & Partial<{ webkitCompassHeading: number }>
+): number | null {
+  const w = (e as any).webkitCompassHeading;
+  if (typeof w === 'number' && !Number.isNaN(w)) return w;
+  if (e.absolute && typeof e.alpha === 'number')
     return (360 - e.alpha + 360) % 360;
-  }
-  // Fall back (still try) if alpha present but not absolute
-  if (typeof e.alpha === "number") return (360 - e.alpha + 360) % 360;
-
+  if (typeof e.alpha === 'number') return (360 - e.alpha + 360) % 360;
   return null;
 }
-
-function onDeviceOrientation(e: DeviceOrientationEvent & Partial<{webkitCompassHeading: number}>) {
-  const h = computeHeadingDeg(e);
-  if (h == null) return;
-
-  // Low-pass smoothing on the absolute heading
-  const prev = yawCurrentDeg;
-  const diff = angDiffDeg(h, prev);
-  yawCurrentDeg = (prev + diff * yawLP + 360) % 360;
-
-  // Relative to zero (center)
-  let rel = angDiffDeg(yawCurrentDeg, yawZeroDeg);
-  // Another tiny smoothing pass for displayed yaw
-  yawDisplayDeg = yawDisplayDeg + (rel - yawDisplayDeg) * yawLP;
+function handleDeviceOrientationEvent(
+  e: DeviceOrientationEvent & Partial<{ webkitCompassHeading: number }>
+) {
+  const headingDeg = computeAbsoluteHeadingDegrees(e);
+  if (headingDeg == null) return;
+  const screenAlignedHeadingDeg = mapHeadingToScreenYawDegrees(headingDeg);
+  const previousAbs = yawAbsoluteDegreesSmoothed;
+  const deltaAbs = shortestAngleDifferenceDegrees(
+    screenAlignedHeadingDeg,
+    previousAbs
+  );
+  yawAbsoluteDegreesSmoothed =
+    (previousAbs + deltaAbs * yawLowPassAlpha + 360) % 360;
+  const relativeYaw = shortestAngleDifferenceDegrees(
+    yawAbsoluteDegreesSmoothed,
+    yawBaselineDegrees
+  );
+  yawRelativeDegreesSmoothed =
+    yawRelativeDegreesSmoothed +
+    (relativeYaw - yawRelativeDegreesSmoothed) * yawLowPassAlpha;
 }
 
-// Request permission (iOS) and wire listener
-async function enableGyro(): Promise<boolean> {
+async function enableGyroscope(): Promise<boolean> {
   try {
-    // iOS 13+ requires permission via a user gesture
-    const anyDO = DeviceOrientationEvent as any;
-    if (typeof anyDO?.requestPermission === "function") {
-      const state = await anyDO.requestPermission();
-      if (state !== "granted") return false;
+    const DOAny = DeviceOrientationEvent as any;
+    if (typeof DOAny?.requestPermission === 'function') {
+      const state = await DOAny.requestPermission();
+      if (state !== 'granted') {
+        dbg('Gyro permission not granted');
+        return false;
+      }
     }
-    window.addEventListener("deviceorientation", onDeviceOrientation as any, { passive: true });
-    gyroEnabled = true;
-    centerGyro();
+    window.addEventListener(
+      'deviceorientation',
+      handleDeviceOrientationEvent as any,
+      { passive: true }
+    );
+    isGyroEnabled = true;
+    centerGyroscopeHeading();
+    placeCameraAtPathT(rideProgressT);
+    dbg('Gyro enabled');
     return true;
-  } catch {
+  } catch (err) {
+    dbg('enableGyroscope error: ' + (err as any)?.message);
     return false;
   }
 }
-function disableGyro() {
-  window.removeEventListener("deviceorientation", onDeviceOrientation as any);
-  gyroEnabled = false;
+function disableGyroscope() {
+  window.removeEventListener(
+    'deviceorientation',
+    handleDeviceOrientationEvent as any
+  );
+  isGyroEnabled = false;
+  dbg('Gyro disabled');
 }
-function centerGyro() {
-  // Use current smoothed heading as zero
-  yawZeroDeg = yawCurrentDeg;
-  yawDisplayDeg = 0;
+function centerGyroscopeHeading() {
+  yawBaselineDegrees = yawAbsoluteDegreesSmoothed;
+  yawRelativeDegreesSmoothed = 0;
+  dbg('Gyro centered');
 }
-// ============================================================================
 
-function placeCameraAt(t: number) {
-  const clamped = THREE.MathUtils.clamp(t, 0, 1);
-  const p = curve.getPointAt(clamped);
-  const tangent = curve.getTangentAt(clamped).normalize();
+/* ============================================================================
+   SECTION: HUD / TARGET MAPPING
+============================================================================ */
 
-  p.y += cameraYOffset;
-  camera.position.copy(p);
+let targetCenterNormalized = 0;
+let targetWidthNormalized = 0.18;
+let leadDistanceAlongPathT = 0.0025;
 
-  // Base look along the path (keeps horizon stable)
-  const lookTarget = p.clone().add(tangent);
-  camera.up.set(0, 1, 0);
-  camera.lookAt(lookTarget);
+/* ============================================================================
+   SECTION: CAMERA + LEAD MARKER PLACEMENT
+============================================================================ */
 
-  // === Apply gyro yaw around WORLD Y (after lookAt) ===
-  if (gyroEnabled) {
-    const yawRad = THREE.MathUtils.degToRad(
-      clamp(-yawDisplayDeg * yawGain, -maxYawDeg, maxYawDeg)
-    );
-    _yawQuat.setFromAxisAngle(_YAXIS, yawRad);
-    camera.quaternion.premultiply(_yawQuat); // world-Y twist on top of path look
+function placeCameraAtPathT(pathT: number) {
+  const clampedT = THREE.MathUtils.clamp(pathT, 0, 1);
+  const positionOnCurve = rideCurve.getPointAt(clampedT);
+  const tangentOnCurve = rideCurve.getTangentAt(clampedT).normalize();
+  positionOnCurve.y += cameraHeightOffset;
+  rideCamera.position.copy(positionOnCurve);
+  const pointWeLookAt = positionOnCurve.clone().add(tangentOnCurve);
+  rideCamera.up.set(0, 1, 0);
+  rideCamera.lookAt(pointWeLookAt);
+
+  const yawRadians = THREE.MathUtils.degToRad(
+    clampNumber(
+      -yawRelativeDegreesSmoothed * yawSensitivity,
+      -maxYawDegrees,
+      maxYawDegrees
+    )
+  );
+  if (isGyroEnabled) {
+    yawQuaternionTemp.setFromAxisAngle(worldYAxis, yawRadians);
+    rideCamera.quaternion.premultiply(yawQuaternionTemp);
   }
+
+  const aheadT = (clampedT + clampNumber(leadDistanceAlongPathT, 0, 1)) % 1;
+  const aheadPoint = rideCurve.getPointAt(aheadT);
+  const aheadTangent = rideCurve.getTangentAt(aheadT).normalize();
+
+  const upWorld = new THREE.Vector3(0, 1, 0);
+  const side = new THREE.Vector3()
+    .crossVectors(upWorld, aheadTangent)
+    .normalize();
+  const outwardNormal = new THREE.Vector3()
+    .crossVectors(aheadTangent, side)
+    .normalize();
+  const markerSurfacePosition = aheadPoint
+    .clone()
+    .addScaledVector(outwardNormal, tubeRadius);
+
+  leadMarkerMesh.position.copy(markerSurfacePosition);
+  leadMarkerMesh.lookAt(markerSurfacePosition.clone().add(aheadTangent));
+
+  const yawNow = Math.atan2(tangentOnCurve.x, tangentOnCurve.z);
+  const yawAhead = Math.atan2(aheadTangent.x, aheadTangent.z);
+  const deltaYawRad =
+    THREE.MathUtils.euclideanModulo(yawAhead - yawNow + Math.PI, Math.PI * 2) -
+    Math.PI;
+  const deltaYawDeg = THREE.MathUtils.radToDeg(deltaYawRad);
+  targetCenterNormalized = clampNumber(deltaYawDeg / maxYawDegrees, -1, 1);
 }
 
-function resetCameraToStart() {
-  rideT = 0;
-  placeCameraAt(0);
-  controls.target.copy(curve.getPointAt(0));
-  controls.update();
+function resetCameraToPathStart() {
+  rideProgressT = 0;
+  placeCameraAtPathT(0); // This sets camera position and lookAt
+
+  // Get the same point the camera is looking at for the orbit controls target
+  const positionOnCurve = rideCurve.getPointAt(0);
+  const tangentOnCurve = rideCurve.getTangentAt(0).normalize();
+  const pointWeLookAt = positionOnCurve.clone().add(tangentOnCurve);
+
+  // Update OrbitControls' target to match the camera's look-at point for a smooth start
+  orbitControls.target.copy(pointWeLookAt);
+  orbitControls.update();
 }
 
-// Public API to control the ride
-export function startRide(durationSeconds = 8, loop = true) {
-  rideDuration = Math.max(0.01, durationSeconds);
-  rideLoop = loop;
-  rideT = 0;
-  rideActive = true;
-  clock.getDelta(); // reset delta so first frame is clean
+/* ============================================================================
+   SECTION: DOM GRABS (HUD + MODAL + CONFIG TOGGLE)
+============================================================================ */
+
+const hudBarElement = document.getElementById('bar') as HTMLDivElement;
+const hudNeedleElement = document.getElementById('needle') as HTMLDivElement;
+const hudTargetElement = document.getElementById('target') as HTMLDivElement;
+const scoreTextElement = document.getElementById('score') as HTMLSpanElement;
+const heartsTextElement = document.getElementById('hearts') as HTMLDivElement;
+const tryAgainModalElement = document.getElementById('modal') as HTMLDivElement;
+const damageVignetteElement = document.getElementById(
+  'vignette'
+) as HTMLDivElement;
+const debugConfigPanel = document.getElementById(
+  'debugConfig'
+) as HTMLDivElement;
+const toggleConfigButton = document.getElementById(
+  'toggle-ui'
+) as HTMLButtonElement;
+
+/* ============================================================================
+   SECTION: GAME STATE (SCORE / HEARTS) + HUD UPDATE
+============================================================================ */
+
+let playerScore = 0;
+let playerHearts = 3;
+let wasInsideTargetPrevFrame = false;
+let scoreAccumulatorSeconds = 0;
+
+function flashDamageVignette() {
+  damageVignetteElement.classList.add('show');
+  setTimeout(() => damageVignetteElement.classList.remove('show'), 350);
 }
-export function stopRide() { rideActive = false; }
-export function resetCamera() { resetCameraToStart(); }
 
-// ---------- UI wiring ----------
-const durationEl = document.getElementById("duration") as HTMLInputElement;
-const loopEl = document.getElementById("loop") as HTMLInputElement;
-document.getElementById("start")?.addEventListener("click", () => {
-  startRide(parseFloat(durationEl.value) || 8, !!loopEl.checked);
-});
-document.getElementById("stop")?.addEventListener("click", () => stopRide());
-document.getElementById("reset")?.addEventListener("click", () => { stopRide(); resetCameraToStart(); });
+function updateHudAndScoring(needleNormalized: number, deltaSeconds: number) {
+  const barWidthPx = hudBarElement.clientWidth;
+  const normalizedToPixels = (n: number) =>
+    (clampNumber(n, -1, 1) + 1) * 0.5 * barWidthPx;
+  const targetWidthPx = Math.max(
+    6,
+    barWidthPx * clampNumber(targetWidthNormalized, 0.02, 1)
+  );
+  const targetLeftPx =
+    normalizedToPixels(targetCenterNormalized) - targetWidthPx / 2;
+  const needleLeftPx = normalizedToPixels(needleNormalized) - 2;
+  hudNeedleElement.style.left = `${needleLeftPx}px`;
+  hudTargetElement.style.left = `${targetLeftPx}px`;
+  hudTargetElement.style.width = `${targetWidthPx}px`;
+  const isOverlapping = !(
+    needleLeftPx + 4 < targetLeftPx ||
+    needleLeftPx > targetLeftPx + targetWidthPx
+  );
+  hudBarElement.style.boxShadow = isOverlapping
+    ? '0 0 12px rgba(46,204,113,0.8)'
+    : 'none';
+  hudBarElement.classList.toggle('ok', isOverlapping);
+  if (isRideActive) {
+    scoreAccumulatorSeconds += deltaSeconds;
+    while (scoreAccumulatorSeconds >= 0.1) {
+      scoreAccumulatorSeconds -= 0.1;
+      if (isOverlapping) {
+        playerScore += 1;
+        scoreTextElement.textContent = String(playerScore);
+      }
+    }
+  }
+  if (isRideActive && wasInsideTargetPrevFrame && !isOverlapping) {
+    playerHearts = Math.max(0, playerHearts - 1);
+    heartsTextElement.textContent =
+      '❤'.repeat(playerHearts) + '♡'.repeat(3 - playerHearts);
+    flashDamageVignette();
+    if (playerHearts <= 0) {
+      isRideActive = false;
+      orbitControls.enabled = true;
+      tryAgainModalElement.style.display = 'grid';
+    }
+  }
+  wasInsideTargetPrevFrame = isOverlapping;
+}
 
-// === Gyro UI ===
-const enableBtn = document.getElementById("enable-gyro");
-const centerBtn  = document.getElementById("center-gyro");
-const senseEl = document.getElementById("gyro-sense") as HTMLInputElement;
+/* ============================================================================
+   SECTION: UI WIRING (BUTTONS + INPUTS)
+============================================================================ */
 
-enableBtn?.addEventListener("click", async () => {
-  if (!gyroEnabled) {
-    const ok = await enableGyro();
+const durationInput = document.getElementById('duration') as HTMLInputElement;
+const loopCheckbox = document.getElementById('loop') as HTMLInputElement;
+
+// Config panel should be hidden on load
+debugConfigPanel.style.display = 'none';
+toggleConfigButton.textContent = 'Show Config';
+
+const startRideAction = async () => {
+  // Logika untuk meminta izin Gyro saat memulai
+  if (!isGyroEnabled) {
+    const ok = await enableGyroscope();
     if (!ok) {
-      alert("Gyro permission denied or not available. Use HTTPS and tap after a user gesture (iOS).");
-      return;
+      alert(
+        'Gyroscope permission is required to play. Please allow access and try again.'
+      );
+      return; // Hentikan fungsi jika izin ditolak
     }
-    (enableBtn as HTMLButtonElement).textContent = "Disable Gyro";
-  } else {
-    disableGyro();
-    (enableBtn as HTMLButtonElement).textContent = "Enable Gyro";
-  }
-});
-centerBtn?.addEventListener("click", () => centerGyro());
-senseEl?.addEventListener("input", () => {
-  const v = parseFloat(senseEl.value);
-  yawGain = Number.isFinite(v) ? v : 1.0;
-});
-
-// Initial placement
-resetCameraToStart();
-
-// ---------- Render loop ----------
-function tick() {
-  const dt = clock.getDelta();
-
-  if (rideActive) {
-    rideT += dt / rideDuration;
-    if (rideT >= 1) {
-      if (rideLoop) rideT %= 1;
-      else { rideT = 1; rideActive = false; }
-    }
-    placeCameraAt(rideT);
-    controls.enabled = false;
-  } else {
-    controls.enabled = true;
-    controls.update();
   }
 
-  renderer.render(scene, camera);
-  requestAnimationFrame(tick);
+  // ===================== PERBAIKAN DI SINI =====================
+  // BARU: Reset orientasi gyro setiap kali permainan dimulai.
+  // Ini memastikan arah "maju" saat ini diatur sebagai titik tengah.
+  centerGyroscopeHeading();
+  // ===========================================================
+
+  startRide(parseFloat(durationInput.value) || 30, !!loopCheckbox.checked);
+  await enterLandscapeFlow();
+};
+
+document.getElementById('start')?.addEventListener('click', startRideAction);
+document
+  .getElementById('startRideGlobal')
+  ?.addEventListener('click', startRideAction);
+
+document.getElementById('stop')?.addEventListener('click', () => stopRide());
+document.getElementById('reset')?.addEventListener('click', () => {
+  stopRide();
+  resetCameraToPathStart();
+});
+
+const centerGyroButton = document.getElementById(
+  'center-gyro'
+) as HTMLButtonElement;
+const gyroSensitivityInput = document.getElementById(
+  'gyro-sense'
+) as HTMLInputElement;
+
+centerGyroButton?.addEventListener('click', () => {
+  centerGyroscopeHeading();
+  placeCameraAtPathT(rideProgressT);
+});
+gyroSensitivityInput?.addEventListener('input', () => {
+  const value = parseFloat(gyroSensitivityInput.value);
+  yawSensitivity = Number.isFinite(value) ? value : 1.0;
+});
+
+const leadPercentInput = document.getElementById('leadT') as HTMLInputElement;
+const targetWidthInput = document.getElementById(
+  'targetWidth'
+) as HTMLInputElement;
+leadPercentInput?.addEventListener('input', () => {
+  const value = parseFloat(leadPercentInput.value);
+  if (Number.isFinite(value)) leadDistanceAlongPathT = clampNumber(value, 0, 1);
+});
+targetWidthInput?.addEventListener('input', () => {
+  const value = parseFloat(targetWidthInput.value);
+  if (Number.isFinite(value))
+    targetWidthNormalized = clampNumber(value, 0.02, 1);
+});
+
+document.getElementById('restart')?.addEventListener('click', () => {
+  (document.getElementById('modal') as HTMLDivElement).style.display = 'none';
+  playerScore = 0;
+  scoreTextElement.textContent = '0';
+  playerHearts = 3;
+  heartsTextElement.textContent = '❤❤❤';
+  wasInsideTargetPrevFrame = false;
+  scoreAccumulatorSeconds = 0;
+  resetCameraToPathStart();
+  // Saat restart, kita panggil startRideAction agar gyro juga di-reset.
+  startRideAction();
+});
+
+// Show/Hide the Debug Config panel
+toggleConfigButton?.addEventListener('click', () => {
+  const isHidden = debugConfigPanel.style.display === 'none';
+  debugConfigPanel.style.display = isHidden ? '' : 'none';
+  toggleConfigButton.textContent = isHidden ? 'Hide Config' : 'Show Config';
+});
+
+/* ============================================================================
+   SECTION: LANDSCAPE / FULLSCREEN HELPERS + OVERLAY
+============================================================================ */
+
+async function requestFullscreenIfNeeded() {
+  try {
+    if (!document.fullscreenElement) {
+      await (document.documentElement as any).requestFullscreen();
+      dbg('Requested fullscreen');
+    }
+  } catch (err) {
+    dbg('requestFullscreen error: ' + (err as any)?.message);
+  }
 }
-tick();
+async function lockOrientationLandscape(): Promise<boolean> {
+  try {
+    // @ts-ignore
+    if (screen.orientation?.lock) {
+      await screen.orientation.lock('landscape');
+      dbg('Orientation locked to landscape');
+      return true;
+    }
+  } catch (err) {
+    dbg('orientation.lock error: ' + (err as any)?.message);
+  }
+  return false;
+}
+function updateLandscapeOverlayVisibility() {
+  const overlay = document.getElementById('landscapeOverlay') as HTMLDivElement;
+  if (!overlay) return;
+  const isLandscape =
+    window.matchMedia && window.matchMedia('(orientation: landscape)').matches;
+  overlay.style.display = isLandscape ? 'none' : 'grid';
+  dbg('Overlay ' + (isLandscape ? 'hidden (landscape)' : 'shown (portrait)'));
+}
 
-// ---------- Resize handling ----------
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+async function enterLandscapeFlow() {
+  await requestFullscreenIfNeeded();
+  await lockOrientationLandscape();
+}
+(
+  document.getElementById('enterLandscape') as HTMLButtonElement
+)?.addEventListener('click', enterLandscapeFlow);
+window.addEventListener('orientationchange', () => {
+  updateLandscapeOverlayVisibility();
+  if (!isRideActive) {
+    centerGyroscopeHeading();
+    resetCameraToPathStart();
+    placeCameraAtPathT(rideProgressT);
+  }
 });
+window.addEventListener('resize', updateLandscapeOverlayVisibility);
+updateLandscapeOverlayVisibility();
 
-// Little axis marker at origin
+/* ============================================================================
+   SECTION: INITIALIZATION LOGIC
+============================================================================ */
+
+function customizeUIAfterLoad() {
+  if (isIOS()) {
+    const enterLandscapeButton = document.getElementById(
+      'enterLandscape'
+    ) as HTMLButtonElement;
+    const instructions = document.getElementById(
+      'landscape-instructions'
+    ) as HTMLParagraphElement;
+
+    if (enterLandscapeButton) {
+      enterLandscapeButton.style.display = 'none';
+    }
+    if (instructions) {
+      instructions.innerHTML =
+        'Please rotate your device to landscape.<br><small>(Make sure Portrait Orientation Lock is disabled in your Control Center)</small>';
+    }
+  }
+}
+
+/* ============================================================================
+   SECTION: PUBLIC API + MAIN LOOP
+============================================================================ */
+
+export function startRide(durationSeconds = 30, loop = true) {
+  rideDurationSeconds = Math.max(0.01, durationSeconds);
+  isRideLooping = loop;
+  rideProgressT = 0;
+  isRideActive = true;
+  frameClock.getDelta();
+  placeCameraAtPathT(rideProgressT);
+}
+export function stopRide() {
+  isRideActive = false;
+}
+
+// --- Initial Setup Calls ---
+customizeUIAfterLoad();
+resetCameraToPathStart();
+
+function renderLoop() {
+  const deltaSeconds = frameClock.getDelta();
+  if (isRideActive) {
+    rideProgressT += deltaSeconds / rideDurationSeconds;
+    if (rideProgressT >= 1) {
+      if (isRideLooping) {
+        rideProgressT %= 1;
+      } else {
+        rideProgressT = 1;
+        isRideActive = false;
+      }
+    }
+    placeCameraAtPathT(rideProgressT);
+    orbitControls.enabled = false;
+  } else {
+    orbitControls.enabled = true;
+    orbitControls.update();
+  }
+  const needleNormalized = clampNumber(
+    (-yawRelativeDegreesSmoothed * yawSensitivity) / maxYawDegrees,
+    -1,
+    1
+  );
+  updateHudAndScoring(needleNormalized, deltaSeconds);
+  webglRenderer.render(scene, rideCamera);
+  requestAnimationFrame(renderLoop);
+}
+renderLoop();
+
+addEventListener('resize', () => {
+  rideCamera.aspect = window.innerWidth / window.innerHeight;
+  rideCamera.updateProjectionMatrix();
+  webglRenderer.setSize(window.innerWidth, window.innerHeight);
+});
 scene.add(new THREE.AxesHelper(2));
