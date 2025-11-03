@@ -126,7 +126,7 @@ let yawBaselineDegrees = 0;
 let yawAbsoluteDegreesSmoothed = 0;
 let yawRelativeDegreesSmoothed = 0;
 let yawLowPassAlpha = 0.15;
-let yawSensitivity = 1.0; // default requested
+let yawSensitivity = 1; // PERHATIAN: Nilai awal dinaikkan, terasa lebih baik untuk roll/pitch
 const maxYawDegrees = 60;
 const yawQuaternionTemp = new THREE.Quaternion();
 const worldYAxis = new THREE.Vector3(0, 1, 0);
@@ -137,9 +137,6 @@ const worldYAxis = new THREE.Vector3(0, 1, 0);
 
 function clampNumber(value: number, lo: number, hi: number) {
   return Math.min(Math.max(value, lo), hi);
-}
-function shortestAngleDifferenceDegrees(a: number, b: number) {
-  return ((a - b + 540) % 360) - 180;
 }
 function isIOS(): boolean {
   return (
@@ -156,67 +153,52 @@ function isIOS(): boolean {
 }
 
 /* ============================================================================
-   SECTION: ORIENTATION-AWARE HEADING → SCREEN-ALIGNED YAW
+   SECTION: ORIENTATION-AWARE LOGIC
 ============================================================================ */
 
-function getScreenOrientationType():
-  | 'portrait'
-  | 'landscape-primary'
-  | 'landscape-secondary' {
+// BARU: Fungsi ini dikembalikan untuk mendeteksi orientasi layar
+function getScreenOrientationType(): 'portrait' | 'landscape' {
   const type = (screen.orientation && screen.orientation.type) || '';
-  if (type.includes('landscape-primary')) return 'landscape-primary';
-  if (type.includes('landscape-secondary')) return 'landscape-secondary';
+  if (type.includes('landscape')) return 'landscape';
   if (type.includes('portrait')) return 'portrait';
-  const legacy = (window as any).orientation;
-  if (legacy === 90) return 'landscape-primary';
-  if (legacy === -90) return 'landscape-secondary';
-  return 'portrait';
-}
-function getLandscapeHeadingOffsetDegrees(): number {
-  const type = getScreenOrientationType();
-  if (type === 'landscape-primary') return -90;
-  if (type === 'landscape-secondary') return 90;
-  return 0;
-}
-function mapHeadingToScreenYawDegrees(absoluteHeadingDeg: number): number {
-  const offset = getLandscapeHeadingOffsetDegrees();
-  return (absoluteHeadingDeg + offset + 360) % 360;
+  // Fallback untuk browser lama
+  return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
 }
 
 /* ============================================================================
    SECTION: DEVICE ORIENTATION → RELATIVE YAW (SMOOTHED)
 ============================================================================ */
 
-function computeAbsoluteHeadingDegrees(
-  e: DeviceOrientationEvent & Partial<{ webkitCompassHeading: number }>
-): number | null {
-  const w = (e as any).webkitCompassHeading;
-  if (typeof w === 'number' && !Number.isNaN(w)) return w;
-  if (e.absolute && typeof e.alpha === 'number')
-    return (360 - e.alpha + 360) % 360;
-  if (typeof e.alpha === 'number') return (360 - e.alpha + 360) % 360;
-  return null;
-}
-function handleDeviceOrientationEvent(
-  e: DeviceOrientationEvent & Partial<{ webkitCompassHeading: number }>
-) {
-  const headingDeg = computeAbsoluteHeadingDegrees(e);
-  if (headingDeg == null) return;
-  const screenAlignedHeadingDeg = mapHeadingToScreenYawDegrees(headingDeg);
+// MODIFIKASI: Fungsi ini sekarang cerdas dan memilih sumbu yang benar
+// berdasarkan orientasi layar saat ini.
+function handleDeviceOrientationEvent(e: DeviceOrientationEvent) {
+  const orientation = getScreenOrientationType();
+  let controlValue: number | null = null;
+
+  // Pilih sumbu yang benar: gamma untuk potret, beta untuk lanskap
+  if (orientation === 'portrait') {
+    // Saat potret, gunakan kemiringan kiri-kanan (roll)
+    controlValue = e.gamma; // Nilai dari -90 (kiri) hingga 90 (kanan)
+  } else {
+    // Saat lanskap, gunakan kemiringan depan-belakang (pitch) untuk efek "setir"
+    controlValue = e.beta; // Nilai dari -180 hingga 180
+    // Kita mungkin perlu membalik nilainya tergantung cara perangkat dipegang,
+    // tetapi kita coba tanpa pembalikan dulu.
+  }
+
+  if (controlValue == null) return;
+
   const previousAbs = yawAbsoluteDegreesSmoothed;
-  const deltaAbs = shortestAngleDifferenceDegrees(
-    screenAlignedHeadingDeg,
-    previousAbs
-  );
-  yawAbsoluteDegreesSmoothed =
-    (previousAbs + deltaAbs * yawLowPassAlpha + 360) % 360;
-  const relativeYaw = shortestAngleDifferenceDegrees(
-    yawAbsoluteDegreesSmoothed,
-    yawBaselineDegrees
-  );
+  const deltaAbs = controlValue - previousAbs;
+
+  // Terapkan filter low-pass untuk menghaluskan
+  yawAbsoluteDegreesSmoothed = previousAbs + deltaAbs * yawLowPassAlpha;
+
+  const relativeValue = yawAbsoluteDegreesSmoothed - yawBaselineDegrees;
+
   yawRelativeDegreesSmoothed =
     yawRelativeDegreesSmoothed +
-    (relativeYaw - yawRelativeDegreesSmoothed) * yawLowPassAlpha;
+    (relativeValue - yawRelativeDegreesSmoothed) * yawLowPassAlpha;
 }
 
 async function enableGyroscope(): Promise<boolean> {
@@ -252,6 +234,8 @@ function disableGyroscope() {
   isGyroEnabled = false;
   dbg('Gyro disabled');
 }
+
+// Fungsi ini sekarang akan mengatur baseline untuk sumbu mana pun yang aktif
 function centerGyroscopeHeading() {
   yawBaselineDegrees = yawAbsoluteDegreesSmoothed;
   yawRelativeDegreesSmoothed = 0;
@@ -282,6 +266,7 @@ function placeCameraAtPathT(pathT: number) {
 
   const yawRadians = THREE.MathUtils.degToRad(
     clampNumber(
+      // MODIFIKASI: Nilai yawRelativeDegreesSmoothed sekarang berasal dari beta/gamma
       -yawRelativeDegreesSmoothed * yawSensitivity,
       -maxYawDegrees,
       maxYawDegrees
@@ -464,6 +449,9 @@ const gyroSensitivityInput = document.getElementById(
   'gyro-sense'
 ) as HTMLInputElement;
 
+// BARU: Set nilai sensitivitas default di UI
+if (gyroSensitivityInput) gyroSensitivityInput.value = String(yawSensitivity);
+
 centerGyroButton?.addEventListener('click', () => {
   centerGyroscopeHeading();
   placeCameraAtPathT(rideProgressT);
@@ -537,8 +525,7 @@ async function lockOrientationLandscape(): Promise<boolean> {
 function updateLandscapeOverlayVisibility() {
   const overlay = document.getElementById('landscapeOverlay') as HTMLDivElement;
   if (!overlay) return;
-  const isLandscape =
-    window.matchMedia && window.matchMedia('(orientation: landscape)').matches;
+  const isLandscape = getScreenOrientationType() === 'landscape';
   overlay.style.display = isLandscape ? 'none' : 'grid';
   dbg('Overlay ' + (isLandscape ? 'hidden (landscape)' : 'shown (portrait)'));
 }
