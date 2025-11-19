@@ -10,12 +10,16 @@
 
     /* Debug Config panel at bottom-left */
     .ui{ position:fixed; bottom:12px; left:12px; z-index:10; font:14px/1.3 system-ui,sans-serif; color:#cde7ff;
-        user-select:none; background:rgba(20,30,45,.6); padding:10px 12px; border-radius:10px; backdrop-filter:blur(6px);
-        border:1px solid rgba(120,170,220,.25); max-width:92vw }
+        user-select:none; background:rgba(20,30,45,.7); padding:10px 12px; border-radius:10px; backdrop-filter:blur(6px);
+        border:1px solid rgba(120,170,220,.25); width: 380px; max-width: 92vw;
+        top: 12px; bottom: auto; max-height: calc(100vh - 24px); overflow-y: auto;
+    }
     .ui input[type='number']{ width:80px } .ui button{ font:inherit }
+    /* Add a little more padding to the content within the scrollable panel */
+    .ui > div, .ui > details { padding-bottom: 4px; }
 
-    /* Toggle buttons (bottom-right) */
-    .ui-toggle, .log-toggle {
+    /* Toggle buttons (top-right) */
+    .ui-toggle, .log-toggle, .extra-toggle {
       position: fixed;
       right: 12px;
       z-index: 11;
@@ -28,14 +32,37 @@
       cursor: pointer;
       backdrop-filter: blur(6px);
     }
-    .ui-toggle { bottom: 12px; }
-    .log-toggle { bottom: 56px; } /* stacked above config toggle */
+    .ui-toggle { top: 12px; }
+    .log-toggle { top: 56px; } /* below config toggle */
+    .extra-toggle { top: 100px; } /* below log toggle */
+
+    /* Primary ride controls (bottom-right) */
+    .primary-controls {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 11;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .primary-controls button {
+      font: 14px/1.3 system-ui, sans-serif;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(120,170,220,.35);
+      background: rgba(20,30,45,.75);
+      color: #cde7ff;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+    }
 
     /* HUD bar */
     .hud{ position:fixed; top:10px; left:50%; transform:translateX(-50%); width:min(66vw,680px); height:36px; z-index:20 }
     .bar{ position:absolute; inset:0; border:2px solid #fff; border-radius:8px; background:rgba(255,255,255,.05); overflow:hidden }
     .target{ position:absolute; top:2px; bottom:2px; background:rgba(46,204,113,.8); border:2px solid rgba(0,0,0,.15); border-radius:6px; transition:width .05s linear }
     .needle{ position:absolute; top:0; bottom:0; width:4px; background:#ff4d4d; left:50%; transform:translate(-2px,0); box-shadow:0 0 6px rgba(255,77,77,.8) }
+    .centerline{ position:absolute; top:0; bottom:0; width:4px; background:rgba(255,255,255,.6); left:50%; transform:translate(-2px,0); pointer-events:none }
 
     /* Score + Hearts */
     .meta{ position:absolute; top:40px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:4px; color:#cde7ff; z-index:20; text-shadow:0 1px 0 rgba(0,0,0,.4) }
@@ -80,8 +107,22 @@
     .debuglog { position: fixed; left: 12px; top: 12px; z-index: 2000; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#e8f3ff; background: rgba(0,0,0,.55); padding:8px 10px; border-radius:8px; max-width: 70vw; max-height: 35vh; overflow:auto; border:1px solid rgba(150,200,255,.25); display:none }
   </style>
   <style>
-    /* Rotations HUD */
-    .rotations-hud {
+    /* Speedometer styles */
+    .speedo-container {
+      position: fixed;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 200px;
+      height: 110px;
+      z-index: 10;
+      opacity: 0.85;
+    }
+    #speedoProgress { transition: stroke-dashoffset 0.1s linear; }
+  </style>
+  <style>
+    /* Extra HUD */
+    .extra-hud {
       position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10; font: 12px/1.3 system-ui, sans-serif;
       color: #cde7ff; user-select: none; background: rgba(20, 30, 45, 0.6); padding: 8px 12px; border-radius: 10px;
       backdrop-filter: blur(6px); border: 1px solid rgba(120, 170, 220, 0.25); text-align: left; }
@@ -93,6 +134,7 @@
   <div class="hud" id="hud">
     <div class="bar" id="bar">
       <div class="target" id="target"></div>
+      <div class="centerline" id="centerline"></div>
       <div class="needle" id="needle"></div>
     </div>
     <div class="meta">
@@ -104,36 +146,117 @@
   <!-- Debug Config panel -->
   <div class="ui" id="debugConfig">
     <div><b>Debug Config</b></div>
-    <div style="margin-top:6px;">
-      Duration (s): <input id="duration" type="number" min="0.1" step="0.1" value="30" />
-      <label style="margin-left:8px;"><input id="loop" type="checkbox" /> Loop</label>
+    <div id="pathInfo" style="margin-top:6px; font-size: 12px; color: var(--text-muted);">
+      <div>Name: <span id="pathName">-</span></div>
+      <div>Date: <span id="pathDate">-</span></div>
     </div>
+    <div style="margin-top:6px;"><label><input id="loop" type="checkbox" /> Loop</label></div>
     <div style="margin-top:6px;">
-      <button id="start">Start Ride</button>
       <button id="stop">Stop</button>
       <button id="reset">Reset Camera</button>
       <button id="enable-gyro" style="margin-left:6px;">Enable Gyro</button>
-      <button id="center-gyro">Center</button>
     </div>
-    <div style="margin-top:6px;">Gyro Sensitivity: <input id="gyro-sense" type="number" step="0.1" min="0" value="1" /></div>
-    <div style="margin-top:6px;">Lead % along path: <input id="leadT" type="number" step="0.0005" min="0" max="1" value="0.0025" /></div>
-    <div style="margin-top:6px;">Target width (norm 0..1): <input id="targetWidth" type="number" step="0.01" min="0.02" max="1" value="0.18" /></div>
-    <div style="margin-top:6px;">Target Smoothing: <input id="targetSmoothing" type="number" step="0.01" min="0" max="1" value="0.1" /></div>
-    <div style="margin-top:6px;">Max Score: <input id="maxScore" type="number" value="15"></div>
+    <div style="margin-top:6px;">Lead Distance (m): <input id="leadDistance" type="number" step="0.05" min="0" value="0.25" /></div>
+    <div style="margin-top:6px;">
+      Camera Offset Range (m):
+      <input id="cameraOffsetMin" type="number" step="0.05" value="-0.25" />
+      to
+      <input id="cameraOffsetMax" type="number" step="0.05" value="0.25" />
+    </div>
+    <div style="margin-top:6px;">Target width (norm 0..1): <input id="targetWidth" type="number" step="0.01" min="0.02" max="1" value="0.2" /></div>
+    <div style="margin-top:6px;">Target Smoothing: <input id="targetSmoothing" type="number" step="0.01" min="0" max="1" value="0.03" /></div>
     <div style="margin-top:6px;">
       <label><input type="checkbox" id="noDamageToggle"> No Damage</label> <br>
       <button id="toggleCurvePointMarkers" style="margin-top:6px;">Hide Curve Point Markers</button>
-      <button id="toggleScoreMarkers" style="margin-top:6px;">Hide Score Markers</button>
+      <button id="toggleCart" style="margin-top:6px;">Hide Cart</button>
+      <button id="toggleLeadMarker" style="margin-top:6px;">Hide Lead Marker</button>
+      <button id="toggleGrid" style="margin-top:6px;">Show Grid</button>
     </div>
+    <details style="margin-top: 8px;">
+      <summary>Path &amp; Appearance</summary>
+      <div class="details-content" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+        <div class="row"><label><span class="label-text" style="width:140px">Path Resolution</span><input type="number" id="resScale" min="2" step="1" value="8192" title="Multiplier for the path's internal resolution. Higher values give smoother curves but may impact performance."></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">Curve Tension</span><input id="tension" type="range" min="0" max="1" step="0.05" value="0.7" title="Controls the tightness of the curve. 0 is linear, 1 is smooth and rounded." /><span id="tensionVal">0.7</span></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">Show Road Mesh</span><input id="roadToggle" type="checkbox" checked title="Toggle between line and road mesh." /></label></div>
+        <div id="roadMeshSettings" style="display: flex; flex-direction: column; gap: 6px;">
+          <div class="row"><label><span class="label-text" style="width:140px">Road Width (m)</span><input id="roadWidth" type="number" min="0.1" step="0.1" value="1" title="The width of the road mesh in meters." /></label></div>
+          <div class="row"><label><span class="label-text" style="width:140px">Height Scale</span><input id="heightScale" type="number" min="0" max="0.1" step="0.0001" value="0.0005" title="Gradual height increase along the path to prevent Z-fighting." /></label></div>
+          <div class="row file-input-row"><span class="label-text" style="width:140px">Ground Texture</span><input id="groundTex" type="file" accept=".jpg,.jpeg,.png" /><button id="btnClearTex" class="btn" title="Remove Texture">X</button></div>
+          <div class="row"><label><span class="label-text" style="width:140px">Road Material</span><select id="roadMaterialPreset"><option value="default">Default Dashed</option><option value="solid">Solid Asphalt</option><option value="racing" selected>Racing Style</option></select></label></div>
+          <div class="row"><label><span class="label-text" style="width:140px">Fade Effect</span><select id="fadeEffect"><option value="dynamic">Dynamic Fade</option><option value="none">No Fade</option></select></label></div>
+          <div id="fadeEffectSettings" style="display: flex; flex-direction: column; gap: 6px; margin-left: 20px; border-left: 2px solid var(--border-color); padding-left: 10px; margin-top: 4px;">
+            <div class="row"><label><span class="label-text" style="width:140px">Fade In Start</span><input id="fadeInStart" type="number" step="0.1" value="-10.0" title="Distance behind cart to start fading in."></label></div>
+            <div class="row"><label><span class="label-text" style="width:140px">Fade In End</span><input id="fadeInEnd" type="number" step="0.1" value="-5.0" title="Distance behind cart to be fully visible."></label></div>
+            <div class="row"><label><span class="label-text" style="width:140px">Fade Out Start</span><input id="fadeOutStart" type="number" step="0.1" value="5.0" title="Distance ahead of cart to start fading out."></label></div>
+            <div class="row"><label><span class="label-text" style="width:140px">Fade Out End</span><input id="fadeOutEnd" type="number" step="0.1" value="20.0" title="Distance ahead of cart to be fully invisible."></label></div>
+          </div>
+        </div>
+      </div>
+    </details>
+      <details style="margin-top: 8px;">
+      <summary>Advanced Speed Profile</summary>
+      <div class="details-content" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+        <div style="font-size:13px; color: var(--text-muted);">Turn Slowdown Windows (normalized)</div>
+        <div class="row"><label><span class="label-text" style="width:140px">Slowdown Start (prev)</span><input id="wPrevStart" type="number" min="0" max="1" step="0.01" value="0.625" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">Slowdown End (prev)</span><input id="wPrevEnd" type="number" min="0" max="1" step="0.01" value="1" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">Hold End (next)</span><input id="wNextHold" type="number" min="0" max="1" step="0.01" value="0" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">Accel End (next)</span><input id="wNextAccel" type="number" min="0" max="1" step="0.01" value="0.5" /></label></div>
+        <div style="font-size:13px; color: var(--text-muted); margin-top: 8px;">Min Speed by Turn Angle (% of base)</div>
+        <div class="row"><label><span class="label-text" style="width:140px">0-20°</span><input id="p0_20" type="number" min="0" max="100" step="0.1" value="100" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">20-45°</span><input id="p20_45" type="number" min="0" max="100" step="0.1" value="90" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">45-90°</span><input id="p45_90" type="number" min="0" max="100" step="0.1" value="75" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">90-120°</span><input id="p90_120" type="number" min="0" max="100" step="0.1" value="60" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">120-150°</span><input id="p120_150" type="number" min="0" max="100" step="0.1" value="10" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">150-165°</span><input id="p150_165" type="number" min="0" max="100" step="0.1" value="5" /></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">165-180°</span><input id="p165_180" type="number" min="0" max="100" step="0.1" value="1" /></label></div>
+      </div>
+    </details>
+    <div style="margin-top:6px;">
+      Import Path: <input type="file" id="importJson" accept=".json" />
+    </div>
+  </div>
+
+  <!-- Primary ride controls (bottom-right) -->
+  <div class="primary-controls">
+    <button id="center-gyro">Recalibrate Gyro</button>
   </div>
 
   <!-- Toggle buttons -->
   <button id="toggle-ui" class="ui-toggle">Hide Config</button>
   <button id="toggle-log" class="log-toggle">Show Log</button>
+  <button id="toggle-extra-hud" class="extra-toggle">Show Extra HUD</button>
 
   <!-- Modal + Vignette -->
   <div class="modal" id="modal"><div class="box"><h2>Try again</h2><p>Hearts depleted. Want another go?</p><button id="restart">Restart</button></div></div>
   <div class="vignette" id="vignette"></div>
+
+  <!-- Success Modal -->
+  <div class="modal" id="successModal">
+    <div class="box">
+      <h2>Congratulations!</h2>
+      <p>Your score for this ride is: <strong><span id="successScore">0</span></strong></p>
+      <button id="successRestart">Restart</button>
+    </div>
+  </div>
+
+  <!-- Calibration Modal -->
+  <div class="modal" id="calibrationModal">
+    <div class="box">
+      <h2>Calibrate Gyro</h2>
+      <p>Hold your phone in a comfortable landscape driving position, then tap Calibrate so the red needle sits at the center line.</p>
+      <div style="margin-top:10px;">
+        Gyro Sensitivity:
+        <input id="gyro-sense" type="range" min="0" max="1" step="0.1" value="1" />
+      </div>
+      <div style="margin-top:14px;">
+        <button id="calibrateGyro">Calibrate Gyro</button>
+        <button id="calibrationStartRide" style="margin-left:8px;">Start Ride</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Countdown overlay -->
+  <div id="countdownOverlay" style="position:fixed; inset:0; display:none; place-items:center; z-index:900; background:rgba(0,0,0,0.5); font:64px/1.2 system-ui,sans-serif; color:#ffffff; text-align:center;"></div>
 
   <!-- Rotate / Landscape overlay -->
   <div id="landscapeOverlay" class="landscape-overlay auto">
@@ -147,8 +270,26 @@
   <!-- On-screen debug log (hidden by default) -->
   <pre id="debuglog" class="debuglog"></pre>
 
-  <!-- Rotations HUD -->
-  <div id="rotationsHud" class="rotations-hud"></div>
+  <!-- Speedometer -->
+  <div class="speedo-container">
+    <svg id="speedometer" viewBox="0 0 200 110">
+        <defs>
+            <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:#3498db;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#e74c3c;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <path id="speedoArc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" />
+        <g id="speedoTicks" stroke="white" stroke-width="2"></g>
+        <use href="#speedoArc" stroke="rgba(0,0,0,0.3)" stroke-width="12" />
+        <use id="speedoProgress" href="#speedoArc" stroke="url(#gradient)" stroke-width="14" stroke-linecap="round" />
+        <text id="speedoValue" x="100" y="95" text-anchor="middle" font-size="40" fill="white" font-weight="bold">0</text>
+        <text x="100" y="110" text-anchor="middle" font-size="14" fill="#aaa">km/h</text>
+    </svg>
+  </div>
+
+  <!-- Extra HUD -->
+  <div id="extraHud" class="extra-hud"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
