@@ -5,7 +5,7 @@
   <title>Coaster Gyro HUD Prototype</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <style>
-    html, body { margin:0; height:100%; background:#0b0f14; overflow:hidden }
+    html, body { margin:0; height:100%; background:#000000; overflow:hidden }
     canvas{ display:block }
 
     /* Debug Config panel at bottom-left */
@@ -60,6 +60,12 @@
     /* HUD bar */
     .hud{ position:fixed; top:10px; left:50%; transform:translateX(-50%); width:min(66vw,680px); height:36px; z-index:20 }
     .bar{ position:absolute; inset:0; border:2px solid #fff; border-radius:8px; background:rgba(255,255,255,.05); overflow:hidden }
+    .bar.damage{
+      border-color:#ff4d4d;
+      box-shadow:0 0 18px rgba(255,77,77,0.9);
+      background:rgba(255,77,77,0.15);
+      transition:box-shadow .15s ease-out, background .15s ease-out;
+    }
     .target{ position:absolute; top:2px; bottom:2px; background:rgba(46,204,113,.8); border:2px solid rgba(0,0,0,.15); border-radius:6px; transition:width .05s linear }
     .needle{ position:absolute; top:0; bottom:0; width:4px; background:#ff4d4d; left:50%; transform:translate(-2px,0); box-shadow:0 0 6px rgba(255,77,77,.8) }
     .centerline{ position:absolute; top:0; bottom:0; width:4px; background:rgba(255,255,255,.6); left:50%; transform:translate(-2px,0); pointer-events:none }
@@ -77,6 +83,9 @@
     /* Damage vignette */
     .vignette{ position:fixed; inset:0; pointer-events:none; z-index:40; opacity:0; transition:opacity .25s ease-out; background:radial-gradient(ellipse at center, rgba(200,0,0,0) 40%, rgba(200,0,0,.35) 70%, rgba(150,0,0,.55) 100%) }
     .vignette.show{ opacity:1 }
+    .damage-side{ position:fixed; top:0; bottom:0; width:50vw; pointer-events:none; z-index:42; opacity:0; transition:opacity .2s ease-out; mix-blend-mode:screen; }
+    .damage-side.left{ left:0; background:linear-gradient(to right, rgba(220,30,30,0.55) 0%, rgba(220,30,30,0.25) 55%, rgba(220,30,30,0) 100%); }
+    .damage-side.right{ right:0; background:linear-gradient(to left, rgba(220,30,30,0.55) 0%, rgba(220,30,30,0.25) 55%, rgba(220,30,30,0) 100%); }
 
     /* Landscape overlay (safe-area + dvh) */
     .landscape-overlay{
@@ -126,6 +135,20 @@
       position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10; font: 12px/1.3 system-ui, sans-serif;
       color: #cde7ff; user-select: none; background: rgba(20, 30, 45, 0.6); padding: 8px 12px; border-radius: 10px;
       backdrop-filter: blur(6px); border: 1px solid rgba(120, 170, 220, 0.25); text-align: left; }
+    .steering-wheel-ui{
+      position: fixed;
+      left: 50%;
+      bottom: 48px;
+      width: 100px;
+      transform: translate(-50%, 0);
+      pointer-events: none;
+      z-index: 30;
+    }
+    .steering-wheel-ui img{
+      width: 100%;
+      display: block;
+      transform-origin: 50% 50%;
+    }
   </style>
 </head>
 <body>
@@ -163,8 +186,14 @@
       to
       <input id="cameraOffsetMax" type="number" step="0.05" value="0.25" />
     </div>
+    <div style="margin-top:6px;">
+      Off Track Window (m):
+      <input id="offTrackMin" type="number" step="0.01" value="-0.10" title="Offset before left damage overlay appears" />
+      to
+      <input id="offTrackMax" type="number" step="0.01" value="0.10" title="Offset before right damage overlay appears" />
+    </div>
     <div style="margin-top:6px;">Target width (norm 0..1): <input id="targetWidth" type="number" step="0.01" min="0.02" max="1" value="0.2" /></div>
-    <div style="margin-top:6px;">Target Smoothing: <input id="targetSmoothing" type="number" step="0.01" min="0" max="1" value="0.03" /></div>
+    <div style="margin-top:6px;">Target Smoothing: <input id="targetSmoothing" type="number" step="0.01" min="0" max="1" value="0.02" /></div>
     <div style="margin-top:6px;">
       <label><input type="checkbox" id="noDamageToggle"> No Damage</label> <br>
       <button id="toggleCurvePointMarkers" style="margin-top:6px;">Hide Curve Point Markers</button>
@@ -176,10 +205,10 @@
       <summary>Path &amp; Appearance</summary>
       <div class="details-content" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
         <div class="row"><label><span class="label-text" style="width:140px">Path Resolution</span><input type="number" id="resScale" min="2" step="1" value="8192" title="Multiplier for the path's internal resolution. Higher values give smoother curves but may impact performance."></label></div>
-        <div class="row"><label><span class="label-text" style="width:140px">Curve Tension</span><input id="tension" type="range" min="0" max="1" step="0.05" value="0.7" title="Controls the tightness of the curve. 0 is linear, 1 is smooth and rounded." /><span id="tensionVal">0.7</span></label></div>
+        <div class="row"><label><span class="label-text" style="width:140px">Curve Tension</span><input id="tension" type="range" min="0" max="1" step="0.05" value="0.85" title="Controls the tightness of the curve. 0 is linear, 1 is smooth and rounded." /><span id="tensionVal">0.85</span></label></div>
         <div class="row"><label><span class="label-text" style="width:140px">Show Road Mesh</span><input id="roadToggle" type="checkbox" checked title="Toggle between line and road mesh." /></label></div>
         <div id="roadMeshSettings" style="display: flex; flex-direction: column; gap: 6px;">
-          <div class="row"><label><span class="label-text" style="width:140px">Road Width (m)</span><input id="roadWidth" type="number" min="0.1" step="0.1" value="1" title="The width of the road mesh in meters." /></label></div>
+          <div class="row"><label><span class="label-text" style="width:140px">Road Width (m)</span><input id="roadWidth" type="number" min="0.1" step="0.1" value="0.5" title="The width of the road mesh in meters." /></label></div>
           <div class="row"><label><span class="label-text" style="width:140px">Height Scale</span><input id="heightScale" type="number" min="0" max="0.1" step="0.0001" value="0.0005" title="Gradual height increase along the path to prevent Z-fighting." /></label></div>
           <div class="row file-input-row"><span class="label-text" style="width:140px">Ground Texture</span><input id="groundTex" type="file" accept=".jpg,.jpeg,.png" /><button id="btnClearTex" class="btn" title="Remove Texture">X</button></div>
           <div class="row"><label><span class="label-text" style="width:140px">Road Material</span><select id="roadMaterialPreset"><option value="default">Default Dashed</option><option value="solid">Solid Asphalt</option><option value="racing" selected>Racing Style</option></select></label></div>
@@ -189,6 +218,16 @@
             <div class="row"><label><span class="label-text" style="width:140px">Fade In End</span><input id="fadeInEnd" type="number" step="0.1" value="-5.0" title="Distance behind cart to be fully visible."></label></div>
             <div class="row"><label><span class="label-text" style="width:140px">Fade Out Start</span><input id="fadeOutStart" type="number" step="0.1" value="5.0" title="Distance ahead of cart to start fading out."></label></div>
             <div class="row"><label><span class="label-text" style="width:140px">Fade Out End</span><input id="fadeOutEnd" type="number" step="0.1" value="20.0" title="Distance ahead of cart to be fully invisible."></label></div>
+          </div>
+          <div class="row"><label><span class="label-text" style="width:140px">HDR Environment</span><input id="hdrToggle" type="checkbox" checked title="Enable image-based lighting from envmap.hdr"></label></div>
+          <div id="hdrSettings" style="display: flex; flex-direction: column; gap: 6px; margin-left: 20px; border-left: 2px solid var(--border-color); padding-left: 10px; margin-top: 4px;">
+            <div class="row"><label><span class="label-text" style="width:140px">Use HDR Background</span><input id="hdrBackgroundToggle" type="checkbox" title="Show the HDR panorama behind the scene."></label></div>
+            <div class="row" style="align-items: center; gap: 6px;"><label><span class="label-text" style="width:140px">HDR Exposure</span><input id="hdrExposure" type="range" min="0.1" max="3" step="0.05" value="1" title="Adjust tone mapping exposure."></label><span id="hdrExposureVal">1.00</span></div>
+          </div>
+          <div class="row" style="margin-top:6px;"><label><span class="label-text" style="width:140px">Fog</span><input id="fogToggle" type="checkbox" title="Toggle distance fog"></label></div>
+          <div id="fogSettings" style="display:none; align-items:center; gap:8px; margin-left: 20px;">
+            <label><span class="label-text" style="width:140px">Fog Radius (m)</span><input id="fogRadius" type="range" min="0" max="100" step="1" value="30" title="Distance at which the scene fades to black."></label>
+            <span id="fogRadiusVal">30m</span>
           </div>
         </div>
       </div>
@@ -229,6 +268,8 @@
   <!-- Modal + Vignette -->
   <div class="modal" id="modal"><div class="box"><h2>Try again</h2><p>Hearts depleted. Want another go?</p><button id="restart">Restart</button></div></div>
   <div class="vignette" id="vignette"></div>
+  <div id="damageLeft" class="damage-side left"></div>
+  <div id="damageRight" class="damage-side right"></div>
 
   <!-- Success Modal -->
   <div class="modal" id="successModal">
@@ -275,9 +316,9 @@
     <svg id="speedometer" viewBox="0 0 200 110">
         <defs>
             <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" style="stop-color:#3498db;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#e74c3c;stop-opacity:1" />
-            </linearGradient>
+                  <stop offset="0%" style="stop-color:#3498db;stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:#8bd4ff;stop-opacity:1" />
+             </linearGradient>
         </defs>
         <path id="speedoArc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" />
         <g id="speedoTicks" stroke="white" stroke-width="2"></g>
@@ -290,6 +331,7 @@
 
   <!-- Extra HUD -->
   <div id="extraHud" class="extra-hud"></div>
+  <div class="steering-wheel-ui"><img id="steeringWheelUi" src="src/steering-wheel.png" alt="Steering wheel HUD" /></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

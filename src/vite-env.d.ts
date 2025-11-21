@@ -5,3 +5,5 @@
 
 // This declaration tells TypeScript that importing a .png file will yield a string (the URL).
 declare module '*.png';
+declare module '*.hdr';
+declare module '*.hdr?url';
